@@ -100,69 +100,46 @@ def main():
 # TASK 2.1
 ############################################################################################
 
-# def expansions(model, h, c, cur_beams, vocab_size):
-#   # index values for all the words in the vocab
-#   all_words = torch.arange(0, vocab_size).unsqueeze(1)
-#   # Get the beams to be size num_beams x |V|
-#   expanded_beams = torch.repeat_interleave(cur_beams, vocab_size, 0)
-#   # Get the words to size |V| x L
-#   expanded_words = torch.repeat_interleave(all_words, len(cur_beams), 0)
-#   if cur_beams.dim() != 1:
-#     # Add the new words to the all the new beams
-#     beams_with_all_words = torch.cat((expanded_beams, expanded_words), dim=1)
-#   else:
-#     beams_with_all_words = expanded_words
-#   # Don't do batch first
-#   zz = torch.transpose(beams_with_all_words, 0, 1)
-#   beams_with_all_words = beams_with_all_words.reshape(beams_with_all_words.shape[-1], -1)
+def expansions(model, h, c, cur_beams, vocab_size):
+  # index values for all the words in the vocab
+  all_words = torch.arange(0, vocab_size).unsqueeze(1)
+  # Get the beams to be size num_beams x |V|
+  expanded_beams = torch.repeat_interleave(cur_beams, vocab_size, 0)
+  # Get the words to size |V| x L
+  expanded_words = torch.repeat_interleave(all_words, len(cur_beams), 0)
+  if cur_beams.dim() != 1:
+    # Add the new words to the all the new beams
+    beams_with_all_words = torch.cat((expanded_beams, expanded_words), dim=1)
+  else:
+    beams_with_all_words = expanded_words
+  # Don't do batch first
+  beams_with_all_words = beams_with_all_words.reshape(beams_with_all_words.shape[-1], -1)
   
-#   h = h.unsqueeze(1).expand(-1, beams_with_all_words.shape[1], -1)
-#   c = c.unsqueeze(1).expand(-1, beams_with_all_words.shape[1], -1)
-#   # z_out, z_h, z_c = model(beams_with_all_words, h, c)
-#   # Get the log_probs off all of the potential beams
-#   out = model(beams_with_all_words, h, c)[0]
-#   new_log_probs = F.log_softmax(out[-1], dim=-1)
+  h = h.unsqueeze(1).expand(-1, beams_with_all_words.shape[1], -1)
+  c = c.unsqueeze(1).expand(-1, beams_with_all_words.shape[1], -1)
+  # z_out, z_h, z_c = model(beams_with_all_words, h, c)
+  # Get the log_probs off all of the potential beams
+  out = model(beams_with_all_words, h, c)[0]
+  t = out[-1, torch.arange(0, vocab_size), torch.arange(0, vocab_size)]
+  # new_log_probs = F.log_softmax(out[-1, ], dim=-1)
+  new_log_probs = F.log_softmax(out[-1, torch.arange(0, vocab_size), torch.arange(0, vocab_size)], dim=-1)
   
-#   return beams_with_all_words, new_log_probs
+  return beams_with_all_words, new_log_probs
 
-# def selection(beams_with_all_words, cur_log_probs, new_log_probs, num_beams):
-#   cur_log_probs = torch.repeat_interleave(cur_log_probs, new_log_probs.shape[0], 0)
-#   # total_log_prob = cur_log_probs + new_log_probs
-#   new_log_probs += cur_log_probs
-#   vals, indices = torch.topk(new_log_probs, num_beams, dim=-1)
-#   # Select the topk best beams
-#   t = indices[:num_beams, 0]
+def selection(beams_with_all_words, cur_log_probs, new_log_probs, num_beams):
+  # cur_log_probs = torch.repeat_interleave(cur_log_probs, new_log_probs.shape[0], 0)
+  # total_log_prob = cur_log_probs + new_log_probs
+  new_log_probs += cur_log_probs
+  vals, indices = torch.topk(new_log_probs, num_beams, dim=-1)
+  # Select the topk best beams
+  # t = indices[:num_beams, 0]
+  t = indices[:num_beams]
   
-#   # Now get the best words from those beams
-#   to_ret = beams_with_all_words[torch.arange(num_beams).unsqueeze(1), t]
-#   z = new_log_probs[t]
-#   return to_ret, new_log_probs[t]
+  # Now get the best words from those beams
+  to_ret = beams_with_all_words[torch.arange(num_beams).unsqueeze(1), t]
+  z = new_log_probs[t]
+  return to_ret, vals
 
-
-# def beamsearch(model, text_field, beams=5, prompt="", max_len=50):
-#   # Initial vals
-#   num_layers = 3
-#   h_c_out = 512
-#   h = torch.zeros(num_layers, h_c_out)
-#   c = torch.zeros(num_layers, h_c_out)
-
-#   # Run prompt through
-#   indices = text_field.process([text_field.tokenize(prompt.lower())])
-#   indices = indices.squeeze()
-#   out, h, c = model(indices[:-1], h, c)
-#   out, h, c = model(indices[-1:], h, c)
-#   vocab_size = len(text_field.vocab.itos)
-
-#   cur_beams = torch.empty(beams)
-#   cur_log_probs = F.log_softmax(out, dim=-1)
-
-#   for _ in range(max_len):
-
-#     beams_with_all_words, new_log_probs = expansions(model, h, c, cur_beams, vocab_size)
-
-#     cur_beams, cur_log_probs = selection(beams_with_all_words, cur_log_probs, new_log_probs, beams)
-
-#   return prompt + " " + reverseNumeralize(cur_beams[0], text_field)
 
 def beamsearch(model, text_field, beams=5, prompt="", max_len=50):
   # Initial vals
@@ -176,36 +153,61 @@ def beamsearch(model, text_field, beams=5, prompt="", max_len=50):
   indices = indices.squeeze()
   out, h, c = model(indices[:-1], h, c)
   out, h, c = model(indices[-1:], h, c)
-  cur_log_prob = F.log_softmax(out, -1)
-  cur_log_probs = cur_log_prob.repeat(beams, 1)
   vocab_size = len(text_field.vocab.itos)
 
-  all_beams = [] * beams
-  vocab_size = len(text_field.vocab.itos)
+  cur_beams = torch.empty(beams)
+  cur_log_probs = F.log_softmax(out[-1], dim=-1)
 
-  # Go over the whole length of the desired output
-  for k in range(max_len):
-    # For all the beams
-    for i in range(beams):
-      log_probs = torch.tensor([])
-      cur_log_prob = cur_log_probs[i]
-      # For each possible word
-      for j in range(vocab_size):
-        cur_string = []
-        if k != 0:
-          cur_string = all_beams[i]
-        cur_string.append(i)
-        out, h, c = model(torch.tensor(cur_string), h, c)
-        t = F.log_softmax(out, -1)
-        total_log_prob = cur_log_prob + F.log_softmax(out, -1)
-        log_probs = torch.cat((log_probs, total_log_prob))
+  for _ in range(max_len):
 
-      vals, indices = torch.topk(log_probs, 1, dim=-1)
-      if k != 0:
-        all_beams[i].append(indices.item())
-      else:
-        all_beams.append([indices.item()])
-      cur_log_probs[i] += vals
+    beams_with_all_words, new_log_probs = expansions(model, h, c, cur_beams, vocab_size)
+
+    cur_beams, cur_log_probs = selection(beams_with_all_words, cur_log_probs, new_log_probs, beams)
+
+  return prompt + " " + reverseNumeralize(cur_beams[0], text_field)
+
+# def beamsearch(model, text_field, beams=5, prompt="", max_len=50):
+#   # Initial vals
+#   num_layers = 3
+#   h_c_out = 512
+#   h = torch.zeros(num_layers, h_c_out)
+#   c = torch.zeros(num_layers, h_c_out)
+
+#   # Run prompt through
+#   indices = text_field.process([text_field.tokenize(prompt.lower())])
+#   indices = indices.squeeze()
+#   out, h, c = model(indices[:-1], h, c)
+#   out, h, c = model(indices[-1:], h, c)
+#   cur_log_prob = F.log_softmax(out, -1)
+#   cur_log_probs = cur_log_prob.repeat(beams, 1)
+#   vocab_size = len(text_field.vocab.itos)
+
+#   all_beams = [] * beams
+#   vocab_size = len(text_field.vocab.itos)
+
+#   # Go over the whole length of the desired output
+#   for k in range(max_len):
+#     # For all the beams
+#     for i in range(beams):
+#       log_probs = torch.tensor([])
+#       cur_log_prob = cur_log_probs[i]
+#       # For each possible word
+#       for j in range(vocab_size):
+#         cur_string = []
+#         if k != 0:
+#           cur_string = all_beams[i]
+#         cur_string.append(i)
+#         out, h, c = model(torch.tensor(cur_string), h, c)
+#         t = F.log_softmax(out, -1)
+#         total_log_prob = cur_log_prob + F.log_softmax(out, -1)
+#         log_probs = torch.cat((log_probs, total_log_prob))
+
+#       vals, indices = torch.topk(log_probs, 1, dim=-1)
+#       if k != 0:
+#         all_beams[i].append(indices.item())
+#       else:
+#         all_beams.append([indices.item()])
+#       cur_log_probs[i] += vals
     
   
 
